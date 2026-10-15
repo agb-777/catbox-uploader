@@ -15,6 +15,7 @@ class ResultsTab(QWidget):
     remove_requested = Signal()
     clear_requested = Signal()
     export_requested = Signal()
+    export_urls_requested = Signal()
     import_requested = Signal()
     delete_from_catbox_requested = Signal()
 
@@ -83,7 +84,13 @@ class ResultsTab(QWidget):
         self.remove_btn.clicked.connect(self.remove_requested.emit)
         self.delete_btn.clicked.connect(self.delete_from_catbox_requested.emit)
         self.import_btn.clicked.connect(self.import_requested.emit)
-        self.export_btn.clicked.connect(self.export_requested.emit)
+        export_menu = QMenu(self.export_btn)
+        a_all = export_menu.addAction("All data (JSON / CSV)...")
+        a_urls = export_menu.addAction("URLs only (TXT)...")
+        a_all.triggered.connect(self.export_requested.emit)
+        a_urls.triggered.connect(self.export_urls_requested.emit)
+        self.export_btn.setProperty("hasMenu", True)   # lets the dark stylesheet leave room for the arrow
+        self.export_btn.setMenu(export_menu)   # one button, two choices
         self.clear_btn.clicked.connect(self.clear_requested.emit)
 
         for b in (self.copy_btn, self.open_btn, self.remove_btn, self.delete_btn):

@@ -1,6 +1,8 @@
 """Uploads ONE file to catbox.moe (streamed from disk, cancellable)."""
 
+import errno
 import os
+import stat
 import time
 
 import requests
@@ -46,20 +48,56 @@ class UploadWorker(ThreadedWorker):
     def on_crash(self, message):
         self._emit(self.failed, clean_msg(message))
 
+    def _open_checked(self):
+        """Open the queued file safely. Returns (file object, size), or None after reporting why not.
+
+        The queue only holds resolved, regular files, but the path could have been swapped for a
+        symlink (to some other file of the user) or a FIFO since then. O_NOFOLLOW refuses a
+        symlink, O_NONBLOCK keeps a FIFO from blocking the open, and the size comes from the very
+        descriptor that will be read (no check-then-open race).
+        """
+        flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                 | getattr(os, "O_CLOEXEC", 0))
+        try:
+            fd = os.open(self.filepath, flags)
+        except OSError as e:
+            if e.errno in (errno.ELOOP, getattr(errno, "EMLINK", -1)):
+                self._emit(self.failed, "File was replaced by a symbolic link; refusing to follow it.")
+            else:
+                self._emit(self.failed, f"Cannot read file: {clean_msg(e)}")
+            return None
+        try:
+            fh = os.fdopen(fd, "rb")
+        except OSError as e:
+            os.close(fd)
+            self._emit(self.failed, f"Cannot read file: {clean_msg(e)}")
+            return None
+        try:
+            st = os.fstat(fh.fileno())
+        except OSError as e:
+            fh.close()
+            self._emit(self.failed, f"Cannot read file: {clean_msg(e)}")
+            return None
+        if not stat.S_ISREG(st.st_mode):
+            fh.close()
+            self._emit(self.failed, "Not a regular file.")
+            return None
+        if st.st_size <= 0:
+            fh.close()
+            self._emit(self.failed, "File is empty.")
+            return None
+        return fh, st.st_size
+
     def run_task(self):
         filename = os.path.basename(self.filepath)
-        try:
-            size = os.path.getsize(self.filepath)
-        except OSError as e:
-            self._emit(self.failed, f"Cannot read file: {e}")
+        opened = self._open_checked()
+        if opened is None:
             return
-        if size <= 0:
-            self._emit(self.failed, "File is empty.")
-            return
+        fh, size = opened
 
         session = requests.Session()
         try:
-            with open(self.filepath, "rb") as fh:
+            with fh:
                 fields = {
                     "reqtype": "fileupload",
                     "fileToUpload": (filename, fh, "application/octet-stream"),

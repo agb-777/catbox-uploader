@@ -13,7 +13,7 @@ from ..core.constants import MIN_COL_W, QUEUE_DEFAULT_WIDTHS
 from ..core.helpers import human_size, plural
 from ..core.queue_item import QueueItem, QueueStatus
 from ..net.status_checker import StatusChecker
-from .theme import GREEN, RED
+from . import theme
 
 
 class UploadTab(QWidget):
@@ -160,7 +160,16 @@ class UploadTab(QWidget):
         self.cancel_requested.emit()
 
     # ---------- service check ----------
-    def _set_service_text(self, text, color=None):
+    def refresh_theme(self):
+        """Re-apply the colours that depend on the active theme (status text, queue statuses)."""
+        self._set_service_text(self.service_status.text(), getattr(self, "_service_kind", None))
+        for row, item in enumerate(self.items):
+            self._paint_status(row, item)
+
+    def _set_service_text(self, text, kind=None):
+        """`kind` is None (normal text), "ok" (green) or "err" (red)."""
+        self._service_kind = kind
+        color = {"ok": theme.ok_color(), "err": theme.err_color()}.get(kind)
         pal = self.service_status.palette()
         pal.setColor(QPalette.ColorRole.WindowText,
                      color if color is not None else self.palette().color(QPalette.ColorRole.WindowText))
@@ -180,7 +189,7 @@ class UploadTab(QWidget):
         w.start()
 
     def _on_status_result(self, ok, message):
-        self._set_service_text(f"catbox.moe: {message}", GREEN if ok else RED)
+        self._set_service_text(f"catbox.moe: {message}", "ok" if ok else "err")
 
     def _on_status_done(self):
         w, self._status_worker = self._status_worker, None
@@ -320,9 +329,9 @@ class UploadTab(QWidget):
         elif item.status == S.PROCESSING:
             text = "Processing"
         elif item.status == S.DONE:
-            text, brush = "Done", GREEN
+            text, brush = "Done", theme.ok_color()
         elif item.status == S.FAILED:
-            text, brush = (f"Failed: {item.detail}" if item.detail else "Failed"), RED
+            text, brush = (f"Failed: {item.detail}" if item.detail else "Failed"), theme.err_color()
         else:
             text = "Cancelled"
         cell.setText(text)

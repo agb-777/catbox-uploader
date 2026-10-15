@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QMainWindow, QMessageB
 from ..core import history_exporter, validators
 from ..core.account_id import acct_id, acct_matches
 from ..core.config import ConfigStore
-from ..core.constants import (APP_NAME, HOME_DIR, MAX_COL_W, MAX_HISTORY_ITEMS, MAX_IMPORT_BYTES,
+from ..core.constants import (APP_TITLE, HOME_DIR, THEMES, MAX_COL_W, MAX_HISTORY_ITEMS, MAX_IMPORT_BYTES,
                               MAX_UPLOAD_BYTES, MIN_COL_W)
 from ..core.helpers import FileTooLarge, clean_msg, human_size, plural, read_regular_file, short_text
 from ..core.history_item import HistoryItem, Mode, mode_label, mode_sort_key, sanitize_item
@@ -22,6 +22,7 @@ from ..net.delete_worker import DeleteWorker
 from .about_tab import AboutTab
 from .results_tab import ResultsTab
 from .settings_tab import SettingsTab, SettingsValues
+from .theme import apply_theme
 from .upload_tab import UploadTab
 
 DOT = "  \u00b7  "
@@ -44,7 +45,7 @@ def confirm(parent, title, text, info="", plain=False):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(760, 460)
         self.resize(900, 560)
 
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         self._col_timer.setInterval(500)
         self._col_timer.timeout.connect(self._flush_col_widths)
 
+        apply_theme(QApplication.instance(), self.cfg.theme)   # before any widget is built/shown
         self._build_ui()
         self._connect_signals()
         self._create_shortcuts()
@@ -101,7 +103,8 @@ class MainWindow(QMainWindow):
         self.upload_tab.set_start_dir(cfg.last_dir)
         self.results_tab = ResultsTab()
         self.settings_tab = SettingsTab(cfg.userhash, SettingsValues(
-            default_dir=cfg.default_dir, auto_history=cfg.auto_history, check_on_start=cfg.check_on_start))
+            default_dir=cfg.default_dir, auto_history=cfg.auto_history, check_on_start=cfg.check_on_start,
+            theme=cfg.theme))
 
         self.tabs.addTab(self.upload_tab, "Upload")
         self.tabs.addTab(self.results_tab, "History")
@@ -131,6 +134,7 @@ class MainWindow(QMainWindow):
         rt.remove_requested.connect(self.remove_selected)
         rt.clear_requested.connect(self.clear_history)
         rt.export_requested.connect(self.export_history)
+        rt.export_urls_requested.connect(self.export_urls)
         rt.import_requested.connect(self.import_history)
         rt.delete_from_catbox_requested.connect(self.delete_from_catbox)
         rt.filter_changed.connect(self._refresh_history)
@@ -148,6 +152,7 @@ class MainWindow(QMainWindow):
         add("Ctrl+Return", self, self._upload_shortcut)
         add("Ctrl+Enter", self, self._upload_shortcut)
         add("Ctrl+E", self, self.export_history)
+        add("Ctrl+Shift+E", self, self.export_urls)
         add("Ctrl+I", self, self.import_history)
         add("Ctrl+R", self, self._check_service_safe)
         add("Ctrl+F", self, self._focus_search)
@@ -191,6 +196,10 @@ class MainWindow(QMainWindow):
             cfg.default_dir = value if isinstance(value, str) else ""
         elif key in ("auto_history", "check_on_start"):
             setattr(cfg, key, bool(value))
+        elif key == "theme":
+            cfg.theme = value if value in THEMES else "light"
+            apply_theme(QApplication.instance(), cfg.theme)
+            self.upload_tab.refresh_theme()
         else:
             return
         self._apply_runtime_settings()
@@ -302,7 +311,7 @@ class MainWindow(QMainWindow):
 
     def _maybe_reset_title(self):
         if not self._closing and not self._busy_uploading():
-            self.setWindowTitle(APP_NAME)
+            self.setWindowTitle(APP_TITLE)
 
     def _escape_pressed(self):
         if self._confirming_cancel or self.batch is None or not self.upload_tab.can_cancel:
@@ -392,7 +401,7 @@ class MainWindow(QMainWindow):
         b.finished.connect(self._on_batch_finished)
 
         self._title_timer.stop()
-        self.setWindowTitle(f"{APP_NAME} - 0%")
+        self.setWindowTitle(f"{APP_TITLE} - 0%")
         self.upload_tab.update_progress(0, "Starting...")
         self.upload_tab.set_uploading(True)
         if len(valid) == 1:
@@ -409,7 +418,7 @@ class MainWindow(QMainWindow):
     def _on_batch_progress(self, overall, speed_text):
         if self._closing:
             return
-        self.setWindowTitle(f"{APP_NAME} - {overall}%")
+        self.setWindowTitle(f"{APP_TITLE} - {overall}%")
         self.upload_tab.update_progress(overall, speed_text)
 
     def _on_item_uploaded(self, _id, url, filename, size):
@@ -809,25 +818,63 @@ class MainWindow(QMainWindow):
             extra += f"{DOT}{over} dropped (history limit {MAX_HISTORY_ITEMS})"
         self.show_status(f"Imported {len(fresh)} {'entry' if len(fresh) == 1 else 'entries'}{extra}")
 
+    def _confirm_overwrite(self, path, chosen):
+        """The file dialog already asked about `chosen`; ask again only if we changed the name
+        (appended an extension) and that new name is an existing file."""
+        if path != chosen and os.path.lexists(path):
+            return confirm(self, "Replace file", f"{os.path.basename(path)} already exists. Replace it?",
+                           plain=True)
+        return True
+
     def export_history(self):
         if not self.cfg.history:
             return
         default = str(HOME_DIR / f"catbox_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         path, selected = QFileDialog.getSaveFileName(
-            self, "Export history", default, "JSON (*.json);;CSV (*.csv);;Plain text (*.txt)")
+            self, "Export history", default, "JSON (*.json);;CSV (*.csv)")
         if not path:
             return
+        chosen = path
         ext = validators.extension_of(path)
-        if ext not in (".json", ".csv", ".txt"):
-            sf = (selected or "").lower()
-            ext = ".csv" if "csv" in sf else ".txt" if "txt" in sf else ".json"
+        if ext not in (".json", ".csv"):   # (a ".txt" name would silently produce a URLs-only file)
+            ext = ".csv" if "csv" in (selected or "").lower() else ".json"
             path += ext
+        if not self._confirm_overwrite(path, chosen):
+            return
         try:
             history_exporter.export_to_file(path, history_exporter.format_from_extension(ext), self.cfg.history)
         except Exception as e:
             self.show_status(f"Export failed: {clean_msg(e, 70)}", "error")
             return
         self.show_status(f"Exported {len(self.cfg.history)} entries")
+
+    def _visible_items(self):
+        """History entries currently shown in the table (respects the search filter)."""
+        by_uid = {h.uid: h for h in self.cfg.history}
+        return [by_uid[u] for u in self._row_uids if u in by_uid]
+
+    def export_urls(self):
+        """Save only the URLs (one per line) of the selected rows, or of all visible rows."""
+        items = self._selected_items() or self._visible_items()
+        items = [it for it in items if it.url]
+        if not items:
+            self.show_status("No URLs to export", "error")
+            return
+        default = str(HOME_DIR / f"catbox_urls_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+        path, _ = QFileDialog.getSaveFileName(self, "Export URLs", default, "Plain text (*.txt)")
+        if not path:
+            return
+        chosen = path
+        if validators.extension_of(path) != ".txt":
+            path += ".txt"
+        if not self._confirm_overwrite(path, chosen):
+            return
+        try:
+            history_exporter.export_to_file(path, "txt", items)
+        except Exception as e:
+            self.show_status(f"Export failed: {clean_msg(e, 70)}", "error")
+            return
+        self.show_status(f"Exported {len(items)} {'URL' if len(items) == 1 else 'URLs'}")
 
     # =================================================================== close
     def closeEvent(self, e):

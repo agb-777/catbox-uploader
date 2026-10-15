@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QLineEdit, QPushButton, QVBoxLayout, QWidget)
 
 
@@ -13,6 +13,7 @@ class SettingsValues:
     default_dir: str = ""
     auto_history: bool = True
     check_on_start: bool = True
+    theme: str = "light"
 
 
 class SettingsTab(QWidget):
@@ -25,6 +26,7 @@ class SettingsTab(QWidget):
         self._saved = saved_userhash or ""
         self._locked = False
         self._applied_dir = values.default_dir
+        self._applied_theme = values.theme if values.theme in ("light", "dark") else "light"
         self._applied_checks = {"auto_history": values.auto_history,
                                 "check_on_start": values.check_on_start}
         self._checks = {}
@@ -72,6 +74,17 @@ class SettingsTab(QWidget):
             uform.addRow("", chk)
         root.addWidget(upload)
 
+        # ---- Appearance ----
+        appearance = QGroupBox("Appearance")
+        aform = QFormLayout(appearance)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Light", "light")
+        self.theme_combo.addItem("Dark", "dark")
+        self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(self._applied_theme)))
+        self.theme_combo.currentIndexChanged.connect(lambda _i: self._refresh_controls())
+        aform.addRow("Theme:", self.theme_combo)
+        root.addWidget(appearance)
+
         root.addStretch(1)
 
         # ---- Apply bar ----
@@ -102,6 +115,8 @@ class SettingsTab(QWidget):
                 changes[key] = chk.isChecked()
         if self.dir_input.text() != self._applied_dir:
             changes["default_dir"] = self.dir_input.text()
+        if self.theme_combo.currentData() != self._applied_theme:
+            changes["theme"] = self.theme_combo.currentData()
         return changes
 
     def _refresh_controls(self):
@@ -119,6 +134,8 @@ class SettingsTab(QWidget):
         for key, value in changes.items():
             if key == "default_dir":
                 self._applied_dir = value
+            elif key == "theme":
+                self._applied_theme = value
             else:
                 self._applied_checks[key] = value
             self.setting_changed.emit(key, value)
@@ -135,6 +152,9 @@ class SettingsTab(QWidget):
             chk.setChecked(self._applied_checks[key])
             chk.blockSignals(False)
         self.dir_input.setText(self._applied_dir)
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(self._applied_theme)))
+        self.theme_combo.blockSignals(False)
         self.userhash_input.setText(self._saved)
         self._refresh_controls()
 

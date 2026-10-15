@@ -5,6 +5,7 @@ from pathlib import Path
 # ---------- App identity ----------
 APP_NAME = "Catbox Uploader"
 APP_VERSION = "1.1.0"
+APP_TITLE = f"{APP_NAME} v{APP_VERSION}"   # main window title
 DESKTOP_FILE_NAME = "catbox-uploader"
 GITHUB_URL = "https://github.com/agb-777/catbox-uploader"   # change if the repo is named differently
 LICENSE_NAME = "MIT"
@@ -66,4 +67,7 @@ MIN_COL_W = 40
 MAX_COL_W = 2000
 # Widths of every column EXCEPT the last one (the last column fills the rest).
 QUEUE_DEFAULT_WIDTHS = [400, 90, 100]            # File, Type, Size | Status
-HISTORY_DEFAULT_WIDTHS = [190, 300, 80, 70, 100]  # Filename, URL, Type, Mode, Size | Date
+HISTORY_DEFAULT_WIDTHS = [190, 270, 80, 70, 100]  # Filename, URL, Type, Mode, Size | Date
+
+THEMES = ("light", "dark")
+DEFAULT_THEME = "light"

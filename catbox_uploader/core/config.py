@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 
 from . import secret_store
 from .account_id import new_salt
-from .constants import CONFIG_FILE, MAX_COL_W, MAX_CONFIG_BYTES, MAX_HISTORY_ITEMS, MIN_COL_W
+from .constants import (CONFIG_FILE, DEFAULT_THEME, MAX_COL_W, MAX_CONFIG_BYTES, MAX_HISTORY_ITEMS,
+                        MIN_COL_W, THEMES)
 from .helpers import FileTooLarge, atomic_write, read_regular_file
 from .history_item import sanitize_item
 from .validators import valid_userhash
@@ -23,6 +24,7 @@ class AppConfig:
     default_dir: str = ""
     auto_history: bool = True
     check_on_start: bool = True
+    theme: str = DEFAULT_THEME
     col_widths: dict = field(default_factory=dict)   # "queue" / "history" (last column never stored)
     history: list = field(default_factory=list)      # list[HistoryItem], newest first
 
@@ -122,6 +124,9 @@ class ConfigStore:
             v = data.get(key)
             if isinstance(v, bool):
                 setattr(cfg, key, v)
+        th = data.get("theme")
+        if isinstance(th, str) and th in THEMES:
+            cfg.theme = th
         salt = data.get("acct_salt")
         if isinstance(salt, str) and _SALT_RE.fullmatch(salt):
             cfg.acct_salt = salt
@@ -191,6 +196,7 @@ class ConfigStore:
             "default_dir": cfg.default_dir,
             "auto_history": cfg.auto_history,
             "check_on_start": cfg.check_on_start,
+            "theme": cfg.theme,
             "history": [h.to_json() for h in cfg.history],
         }
         try:
