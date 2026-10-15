@@ -86,6 +86,10 @@ class UploadWorker(ThreadedWorker):
             fh.close()
             self._emit(self.failed, "File is empty.")
             return None
+        try:
+            os.set_blocking(fh.fileno(), True)   # O_NONBLOCK was only meant for the open itself
+        except (OSError, ValueError, AttributeError):
+            pass
         return fh, st.st_size
 
     def run_task(self):

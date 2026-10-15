@@ -2,7 +2,9 @@
 
 from string import Template
 
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen
+from PySide6.QtWidgets import QProxyStyle, QStyle
 
 from ..core.constants import DEFAULT_THEME, THEMES
 from . import app_icon
@@ -127,11 +129,6 @@ QTableWidget::item { padding: 4px 6px; border: none; }
 QGroupBox { border: 1px solid $border; margin-top: 14px; padding: 14px 12px 10px 12px; }
 QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: $muted; }
 
-QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid $handle_hover; background: $surface; }
-QCheckBox::indicator:hover { border-color: $accent; }
-QCheckBox::indicator:checked { background: $accent; border-color: $accent; }
-QCheckBox::indicator:disabled { border-color: $border; background: $bg; }
-
 QProgressBar { background: $surface; border: 1px solid $border;
                text-align: center; color: $text; min-height: 18px; }
 QProgressBar::chunk { background: $accent; }
@@ -157,18 +154,82 @@ QStatusBar::item { border: none; }
 """)
 
 
+# ------------------------------------------------------------------ checkbox
+_tokens = LIGHT
+
+
+class _AppStyle(QProxyStyle):
+    """Fusion, except the check box: a square box with a real check mark that stays clearly
+    visible on both themes (Fusion's own outline almost disappears on a dark window)."""
+
+    def __init__(self):
+        super().__init__("Fusion")
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if element != QStyle.PrimitiveElement.PE_IndicatorCheckBox:
+            super().drawPrimitive(element, option, painter, widget)
+            return
+        t = _tokens
+        S = QStyle.StateFlag
+        enabled = bool(option.state & S.State_Enabled)
+        on = bool(option.state & S.State_On)
+        partial = bool(option.state & S.State_NoChange)
+        hover = bool(option.state & S.State_MouseOver)
+
+        if not enabled:
+            border, fill, mark = t["border"], t["bg"], t["disabled"]
+        elif on or partial:
+            border, fill, mark = t["accent"], t["accent"], "#FFFFFF"
+        else:
+            border, fill, mark = (t["accent"] if hover else t["handle_hover"]), t["surface"], "#FFFFFF"
+
+        r = option.rect
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setPen(QPen(QColor(border), 1))
+        painter.setBrush(QColor(fill))
+        painter.drawRect(r.adjusted(0, 0, -1, -1))
+
+        if on or partial:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            pen = QPen(QColor(mark), max(1.6, r.width() / 7.0))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            x, y, w, h = r.x(), r.y(), r.width(), r.height()
+            if partial and not on:
+                painter.drawLine(QPointF(x + w * 0.27, y + h * 0.5), QPointF(x + w * 0.73, y + h * 0.5))
+            else:
+                painter.drawPolyline([QPointF(x + w * 0.24, y + h * 0.54),
+                                      QPointF(x + w * 0.43, y + h * 0.72),
+                                      QPointF(x + w * 0.76, y + h * 0.30)])
+        painter.restore()
+
+
+_style = None   # created once; kept referenced so Qt's ownership never dangles
+
+
+def _install_style(app):
+    global _style
+    if _style is None:
+        _style = _AppStyle()
+        app.setStyle(_style)
+
+
 # ------------------------------------------------------------------ public
 def apply_theme(app, name):
     """Apply 'light' or 'dark' (anything else falls back to the default).
 
     Also switches the application icon to the matching colour scheme.
     """
-    global _current
+    global _current, _tokens
     if name not in THEMES:
         name = DEFAULT_THEME
     _current = name
     tokens = DARK if name == "dark" else LIGHT
-    app.setStyle("Fusion")
+    _tokens = tokens
+    _install_style(app)
     app.setPalette(_palette(tokens))
     app.setStyleSheet(_QSS.substitute(tokens))
     app.setWindowIcon(app_icon.icon(name))
