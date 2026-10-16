@@ -1,9 +1,15 @@
 """Small formatting / text / file helpers. No Qt."""
 
 import os
+import re
 import stat
 import tempfile
 from pathlib import Path
+
+
+def natural_key(name):
+    """Sort key for 'natural' order: img2.png comes before img10.png, case-insensitive."""
+    return [int(t) if t.isdigit() else t.casefold() for t in re.split(r"(\d+)", name)]
 
 
 def human_size(n):

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QHea
 
 from ..core import validators
 from ..core.constants import MIN_COL_W, QUEUE_DEFAULT_WIDTHS
-from ..core.helpers import human_size, plural
+from ..core.helpers import human_size, natural_key, plural
 from ..core.queue_item import QueueItem, QueueStatus
 from ..net.status_checker import StatusChecker
 from . import theme
@@ -280,6 +280,8 @@ class UploadTab(QWidget):
             added += 1
 
         if added:
+            # Keep the queue (and so the upload order) sorted by file name, numbers in natural order.
+            self.items.sort(key=lambda it: (natural_key(it.name), os.path.normcase(it.path)))
             self._start_dir = last_dir
             self.speed_label.clear()
             self.progress.setValue(0)
